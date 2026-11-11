@@ -1,0 +1,6 @@
+model-roles.properties
+__pycache__/
+*.egg-info/
+dist/
+build/
+.venv/

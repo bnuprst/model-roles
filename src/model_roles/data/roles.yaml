@@ -1,0 +1,48 @@
+# Which model does which job. Change one line to swap models.
+# backend: codex    -> runs `codex exec` (uses your ChatGPT/Codex subscription login)
+# backend: deepseek -> runs Claude Code headless against DeepSeek's Anthropic-compatible API (API key, pay per token)
+# backend: claude   -> runs Claude Code headless on your Claude subscription
+#
+# reasoning (optional): how hard the model thinks. Omit to use the CLI's default.
+#   codex:           minimal | low | medium | high | xhigh
+#   claude/deepseek: low | medium | high | xhigh | max
+#
+# codex model short names: astra | sol | terra | luna expand to the newest matching
+# model in codex's cache (e.g. sol -> gpt-6.1-sol). Use a full slug to pin a version.
+
+roles:
+  planner:
+    backend: codex
+    model: gpt-6-astra
+    reasoning: high
+    instructions: >
+      You are the planner. Do NOT edit files. Read the repo and write a concrete,
+      step-by-step implementation plan: files to change, functions, edge cases,
+      and how to test. Output the plan only.
+
+  executor:
+    backend: deepseek
+    model: deepseek-v4-pro
+    reasoning: medium
+    instructions: >
+      You are the executor. Implement the given plan exactly. Do not redesign.
+      Run the relevant tests. At the end, list the files you changed and the test results.
+
+  reviewer:
+    backend: claude
+    model: opus
+    reasoning: high
+    instructions: >
+      You are the reviewer. Do NOT edit files. Review the current uncommitted diff
+      against the plan. Run the tests. Report: bugs, missed requirements, risky
+      changes, and a verdict: APPROVE or CHANGES_NEEDED.
+
+backends:
+  deepseek:
+    base_url: https://api.deepseek.com/anthropic
+    # Key lookup order: env var below (also set by `claude mcp add -e ...`),
+    # then `deepseek.api_key` in model-roles.properties, then api_key here.
+    api_key_env: DEEPSEEK_API_KEY
+    # api_key: sk-...   # works, but prefer the properties file or env so the key stays out of yaml you share
+
+timeout_seconds: 1800
