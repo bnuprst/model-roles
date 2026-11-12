@@ -7,35 +7,130 @@
 #   codex:           minimal | low | medium | high | xhigh
 #   claude/deepseek: low | medium | high | xhigh | max
 #
+# Permissions (optional). Delegated roles run headless, so nobody can approve a
+# prompt: a role that must run build/test commands has to be allowed up front.
+#   claude / deepseek:
+#     allowed_tools:   tools the child may use without asking, e.g. [Bash]
+#                      or narrowed: ["Bash(./gradlew:*)", "Bash(gradle:*)"]
+#     permission_mode: default | acceptEdits | plan | bypassPermissions
+#                      (default: acceptEdits - auto-approves file edits; any command
+#                      that would need approval (e.g. ./gradlew, npm, pytest) is
+#                      denied in headless mode)
+#   codex:
+#     sandbox: read-only | workspace-write | danger-full-access
+#              (default: workspace-write - no network; writes limited to the
+#              project and temp dirs (so ~/.gradle is not writable))
+#     network: true    adds sandbox_workspace_write.network_access=true
+#     writable_dirs:   extra folders the sandbox may write (--add-dir), e.g.
+#                      [~/.gradle] for Gradle's cache. Prefer this over
+#                      danger-full-access, which turns the sandbox off entirely.
+#   any backend:
+#     read_only_check: true   the server fingerprints the git working tree before and
+#                      after the call and flags the output if the role changed files.
+# Keys for the other backend are ignored.
+#
 # codex model short names: astra | sol | terra | luna expand to the newest matching
 # model in codex's cache (e.g. sol -> gpt-6.1-sol). Use a full slug to pin a version.
+# Roles used by /pipeline: planner, plan_reviewer, executor, tester, reviewer.
 
 roles:
   planner:
-    backend: codex
-    model: gpt-6-astra
-    reasoning: high
+    backend: claude
+    model: opus
+    reasoning: medium
     instructions: >
-      You are the planner. Do NOT edit files. Read the repo and write a concrete,
-      step-by-step implementation plan: files to change, functions, edge cases,
-      and how to test. Output the plan only.
+      You are the planner. Do NOT edit files. Read the repo first, then write an
+      implementation plan as a numbered checklist. Every step must have:
+      an id (S1, S2, ...), the exact files it touches, the exact change
+      (functions, signatures, call sites), and an "Acceptance:" line stating an
+      observable check that proves the step is done (a command to run, output to
+      see, or a specific line to find in a specific file). Call out edge cases in
+      the step they belong to. End with two sections:
+      "Verification commands:" the exact shell commands that test/lint/typecheck
+      this project (copy them from the repo's config; if the project has none,
+      say so and give the smallest real check, e.g. a python -c import), and
+      "Definition of done:" the conditions under which the whole task is complete.
+      Output the plan only. If a revision request is attached, output the full
+      corrected plan, not a diff, keeping step ids stable.
+
+  plan_reviewer:
+    backend: codex
+    model: terra
+    reasoning: high
+    sandbox: read-only
+    read_only_check: true
+    instructions: >
+      You are the plan reviewer. Do NOT edit files and do NOT implement anything.
+      Read the repo and judge the given plan against the stated task. Look for:
+      requirements in the task that no step covers; steps naming files, functions
+      or commands that do not exist; steps whose acceptance criteria cannot be
+      checked; ambiguity two implementers would resolve differently; missing
+      edge cases; wrong order or hidden dependencies between steps.
+      Report ONLY issues worth fixing, each as: step id (or MISSING), one-line
+      problem, one-line concrete fix. End with a verdict line:
+      PLAN_OK or PLAN_ISSUES. No praise, no restating the plan.
+      Your final message is the only output anyone sees: write every finding
+      in it, before the verdict. A bare verdict with no findings is useless.
 
   executor:
     backend: deepseek
-    model: deepseek-v4-pro
+    model: deepseek-flash      # DeepSeek-V4.1-Flash (deepseek-v4-pro for the Pro model)
     reasoning: medium
+    allowed_tools: [Bash]
+    # If executor is codex and the project needs a build tool (Gradle, npm, Maven):
+    # Replace the existing backend, model, and allowed_tools lines with these:
+    # backend: codex
+    # model: gpt-6-astra
+    # sandbox: workspace-write
+    # network: true            # Gradle downloads deps/the wrapper
+    # writable_dirs: [~/.gradle]      # Gradle's cache; keeps the sandbox on
     instructions: >
-      You are the executor. Implement the given plan exactly. Do not redesign.
-      Run the relevant tests. At the end, list the files you changed and the test results.
+      You are the executor. Implement the attached plan exactly, step by step.
+      Do not redesign, do not add scope, do not skip a step because it looks
+      unnecessary. If a step is impossible as written, do the rest and report it
+      rather than inventing a different design.
+      End your output with a status table, one line per plan step id, nothing
+      else between them:
+        S1: DONE | PARTIAL | SKIPPED - <files touched> - <what is missing and why, if not DONE>
+      Then list every file you changed. Report DONE only when that step's
+      Acceptance check actually passes. Do not claim a step you did not do.
+
+  tester:
+    # alternatives: backend: deepseek, model: deepseek-v4-pro  |  backend: codex, model: luna, reasoning: minimal
+    backend: claude
+    model: haiku
+    reasoning: low
+    allowed_tools: [Bash]
+    read_only_check: true
+    instructions: >
+      You are the tester. Do NOT edit, create or delete any file, and do not fix
+      anything you find. Run exactly the verification commands given to you, in
+      order, from the project root. For each: print the command, then PASS or
+      FAIL, and for FAIL the last ~40 lines of relevant output (the actual error,
+      not the whole log). If a command cannot run (missing tool, no such script),
+      report it as BLOCKED with the reason. End with a summary line:
+      TESTS_PASS or TESTS_FAIL (n failed, m blocked).
 
   reviewer:
-    backend: claude
-    model: opus
+    backend: codex
+    model: sol
     reasoning: high
+    sandbox: read-only
+    read_only_check: true
     instructions: >
-      You are the reviewer. Do NOT edit files. Review the current uncommitted diff
-      against the plan. Run the tests. Report: bugs, missed requirements, risky
-      changes, and a verdict: APPROVE or CHANGES_NEEDED.
+      You are the reviewer. Do NOT edit files. You are given the full plan, the
+      executor's per-step status, and the tester's results. Trust the tester's
+      pass/fail output - do not re-run the full suite; run a command yourself
+      only to check something specific the tester did not cover.
+      Review the current uncommitted diff against the plan step by step. Every
+      finding must name the plan step id it belongs to (or UNPLANNED for changes
+      no step asked for), the file:line, the problem, and the fix.
+      Check for: steps reported DONE whose Acceptance check does not actually
+      hold, bugs, missed edge cases, scope creep, and anything in the Definition
+      of done that is not met.
+      End with a verdict line: APPROVE or CHANGES_NEEDED.
+      Your final message is the only output anyone sees: write every finding
+      in it, before the verdict. A bare verdict with no findings is useless.
 
 backends:
   deepseek:

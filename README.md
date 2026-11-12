@@ -5,9 +5,11 @@ It hands work to other models by role. `roles.yaml` decides which model does whi
 
 | Role | Default | Paid by |
 |---|---|---|
-| planner | GPT-6 Astra via `codex exec` | ChatGPT/Codex subscription |
-| executor | DeepSeek V4 Pro via headless Claude Code + DeepSeek API | DeepSeek API key |
-| reviewer | Opus via headless Claude Code | Claude subscription |
+| planner | Opus (medium reasoning) via headless Claude Code | Claude subscription |
+| plan_reviewer | GPT Terra via `codex exec` | ChatGPT/Codex subscription |
+| executor | DeepSeek V4.1 Flash (`deepseek-flash`) via headless Claude Code + DeepSeek API | DeepSeek API key |
+| tester | Haiku via headless Claude Code | Claude subscription |
+| reviewer | GPT Sol via `codex exec` | ChatGPT/Codex subscription |
 
 ## Install (global)
 
@@ -19,12 +21,20 @@ pipx install /path/to/model-roles
 pip install --user /path/to/model-roles   # plain pip
 ```
 
+`pip install --user` can't change PATH on its own, so you may see "model-roles.exe is installed in ...
+which is not on PATH". That's fine. Run `python -m model_roles init` once. `init` finds the folder the
+script was installed to and, on Windows, adds it to your user PATH. On macOS and Linux it prints the
+`export PATH=...` line to put in your shell profile. Then open a new terminal, and restart VS Code or
+Claude Code so they see the new PATH. To leave PATH alone, use `init --no-path`. `model-roles doctor`
+tells you whether the command is on PATH.
+
 Then:
 
 ```bash
 npm i -g @openai/codex && codex login     # for the codex backend
 model-roles init                          # writes ~/.config/model-roles/{roles.yaml,model-roles.properties}
-                                          # and ~/.claude/commands/pipeline.md
+                                          # and ~/.claude/commands/pipeline.md, and fixes PATH if needed
+                                          # (use `python -m model_roles init` if the command isn't found yet)
 claude mcp add roles --scope user -e DEEPSEEK_API_KEY=sk-... -- model-roles
 model-roles doctor                        # shows which config and key will be used
 ```
@@ -79,6 +89,9 @@ Every tool call reads the config again, so edits apply without a restart.
 ```
 Or just ask: "use the roles tool, ask the planner for ...".
 
+The `/pipeline` stages: plan → plan review (max 2 corrections) → execute → gap
+re-send of unfinished steps (once) → test → review (max 3 loops).
+
 ## Swap models
 
 Edit `roles.yaml`:
@@ -89,13 +102,29 @@ executor: { backend: codex,    model: gpt-6-astra }
 reviewer: { backend: deepseek, model: deepseek-v4-pro }
 ```
 
-You can also add new roles (e.g. `tester`, `security-reviewer`). They show up automatically.
+`tester` ships by default; you can add more (e.g. `security-reviewer`). They show up automatically.
+
+`list_roles` and `model-roles doctor` print non-default permission settings (e.g. `claude / haiku / tools=Bash`).
 
 For the codex backend you can use short names: `astra`, `sol`, `terra`, `luna`. Each one expands to the newest matching model in codex's local model cache (`~/.codex/models_cache.json`), so `sol` becomes `gpt-6.1-sol`. Write the full slug (`gpt-6-sol`) to pin a version. `list_roles` shows what each short name resolves to.
 
+## Upgrading
+
+Existing installs keep their old `roles.yaml`. Either copy the `plan_reviewer` and
+`tester` blocks from the bundled `roles.yaml` into your `~/.config/model-roles/roles.yaml`
+(or project `./roles.yaml`), or run `model-roles init --force` (this overwrites your
+`roles.yaml` and pipeline command - back up custom edits first). `/pipeline` falls back
+to `reviewer` if those roles are missing.
+
 ## Notes
 - The DeepSeek override applies only to the child process. Your main session stays on the subscription.
-- The executor runs with edits auto-accepted (`--sandbox workspace-write` / `acceptEdits`). Use git, and commit before each run.
+- By default, claude/deepseek run `--permission-mode acceptEdits`, which auto-approves file edits; any command that would need approval (e.g. `./gradlew`, `npm`, `pytest`) is denied in headless mode. Codex runs `--sandbox workspace-write`: no network; writes limited to the project and temp dirs (so `~/.gradle` is not writable).
+- Per role, claude/deepseek accept `allowed_tools` (a string or list of strings) and `permission_mode` (`default`, `acceptEdits`, `plan`, or `bypassPermissions`). Codex accepts `sandbox` (`read-only`, `workspace-write`, or `danger-full-access`), `network` (`true` to enable network access) and `writable_dirs` (extra writable folders, passed as `--add-dir`; `~` is expanded).
+- For Gradle, give claude/deepseek `allowed_tools: [Bash]` (or `["Bash(./gradlew:*)"]`). For codex, keep `sandbox: workspace-write` and set `network: true` plus `writable_dirs: [~/.gradle]` (or your `GRADLE_USER_HOME`). Avoid `danger-full-access`: it turns the sandbox off entirely.
+- The tester and the two review roles are told not to edit files, but the backends still run with write permission. Roles with `read_only_check: true` (on by default for those three) get a git working-tree fingerprint before and after the call, and the output carries a WARNING if anything changed. Use git and commit before each run.
+- `delegate` takes `save_as` (store the role's full output as `.model-roles/<name>.md` in the project, git-ignored automatically) and `attach` (insert earlier saved outputs into the child's prompt). With `save_as`, the calling session gets only a short digest back. `/pipeline` uses this so the main session never re-types the plan, test log or review: that re-typing was most of its token cost.
+- Codex roles return only codex's final message (`--output-last-message`), not its progress log.
+- Existing installs keep their old `roles.yaml`: copy the `allowed_tools` lines into `~/.config/model-roles/roles.yaml` (or `./roles.yaml`), or run `model-roles init --force` (overwrites files; back up first).
 - Keep `model-roles.properties` out of git. It is already in `.gitignore`.
 - CLI flags change between versions. If something fails, check `codex exec --help` and `claude --help`.
-- Model names (`gpt-6-astra`, `deepseek-v4-pro`) must be ones your account can use. Test them with a quick manual run first.
+- Model names (`gpt-6-astra`, `deepseek-flash`) must be ones your account can use. Test them with a quick manual run first.
