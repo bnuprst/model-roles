@@ -6,10 +6,10 @@ It hands work to other models by role. `roles.yaml` decides which model does whi
 | Role | Default | Paid by |
 |---|---|---|
 | planner | Opus (medium reasoning) via headless Claude Code | Claude subscription |
-| plan_reviewer | GPT Terra via `codex exec` | ChatGPT/Codex subscription |
-| executor | GPT-6 Luna (`luna`, reasoning `high`) via `codex exec` | ChatGPT/Codex login |
-| tester | Haiku via headless Claude Code | Claude subscription |
-| reviewer | GPT Sol via `codex exec` | ChatGPT/Codex subscription |
+| plan_reviewer | GPT Terra (medium) via `codex exec`, read-only sandbox | ChatGPT/Codex subscription |
+| executor | Sonnet (medium) via headless Claude Code, Bash + PowerShell allowed | Claude subscription |
+| tester | Haiku (medium) via headless Claude Code, Bash + PowerShell allowed, no edits | Claude subscription |
+| reviewer | GPT Astra (medium) via `codex exec`, read-only sandbox | ChatGPT/Codex subscription |
 
 ## Install (global)
 
@@ -140,9 +140,9 @@ to `reviewer` if those roles are missing.
 ## Notes
 - The DeepSeek override applies only to the child process. Your main session stays on the subscription.
 - By default, claude/deepseek run `--permission-mode acceptEdits`, which auto-approves file edits; any command that would need approval (e.g. `./gradlew`, `npm`, `pytest`) is denied in headless mode. Codex runs `--sandbox workspace-write`: no network; writes limited to the project and temp dirs (so `~/.gradle` is not writable).
-- Per role, claude/deepseek accept `allowed_tools` (a string or list of strings) and `permission_mode` (`default`, `acceptEdits`, `plan`, or `bypassPermissions`). Codex accepts `sandbox` (`read-only`, `workspace-write`, or `danger-full-access`), `network` (`true` to enable network access) and `writable_dirs` (extra writable folders, passed as `--add-dir`; `~` is expanded).
+- Per role, claude/deepseek accept `allowed_tools` (a string or list of strings) and `permission_mode` (`default`, `acceptEdits`, `plan`, or `bypassPermissions`). Any role accepts `timeout_seconds` to override the global timeout. Codex accepts `sandbox` (`read-only`, `workspace-write`, or `danger-full-access`), `network` (`true` to enable network access) and `writable_dirs` (extra writable folders, passed as `--add-dir`; `~` is expanded).
 - For Gradle, give claude/deepseek `allowed_tools: [Bash]` (or `["Bash(./gradlew:*)"]`). For codex, keep `sandbox: workspace-write` and set `network: true` plus `writable_dirs: [~/.gradle]` (or your `GRADLE_USER_HOME`). Avoid `danger-full-access`: it turns the sandbox off entirely.
-- The tester and the two review roles are told not to edit files, but the backends still run with write permission. Roles with `read_only_check: true` (on by default for those three) get a git working-tree fingerprint before and after the call, and the output carries a WARNING if anything changed. Use git and commit before each run.
+- The planner, tester and the two review roles are told not to edit files. By default the codex reviewers run `sandbox: read-only` and the claude planner/tester run `permission_mode: default`, so edits are denied headless. Roles with `read_only_check: true` (on by default for those four) get a git working-tree fingerprint before and after the call, and the output carries a WARNING if anything changed. Use git and commit before each run.
 - `delegate` takes `save_as` (store the role's full output as `.model-roles/<name>.md` in the project, git-ignored automatically) and `attach` (insert earlier saved outputs into the child's prompt). With `save_as`, the calling session gets only a short digest back. `/pipeline` uses this so the main session never re-types the plan, test log or review: that re-typing was most of its token cost.
 - Codex roles return only codex's final message (`--output-last-message`), not its progress log.
 - Existing installs keep their old `roles.yaml`: copy the `allowed_tools` lines into `~/.config/model-roles/roles.yaml` (or `./roles.yaml`), or run `model-roles init --force` (overwrites files; back up first).

@@ -27,7 +27,11 @@
 #   any backend:
 #     read_only_check: true   the server fingerprints the git working tree before and
 #                      after the call and flags the output if the role changed files.
-# Keys for the other backend are ignored.
+#                      It only warns; it does not block or undo the change.
+#     timeout_seconds: per-role override of the global timeout_seconds below.
+# Keys for the other backend are ignored (e.g. `sandbox` does nothing on claude:
+# a claude role with no permission_mode runs acceptEdits and CAN edit files - give
+# read-only claude roles permission_mode: default).
 #
 # codex model short names: astra | sol | terra | luna expand to the newest matching
 # model in codex's cache (e.g. sol -> gpt-6.1-sol). Use a full slug to pin a version.
@@ -38,6 +42,8 @@ roles:
     backend: claude
     model: opus
     reasoning: medium
+    permission_mode: default   # edits need approval -> denied headless; Read/Grep/Glob still work
+    read_only_check: true
     instructions: >
       You are the planner. Do NOT edit files. Read the repo first, then write an
       implementation plan as a numbered checklist. Every step must have:
@@ -63,7 +69,7 @@ roles:
   plan_reviewer:
     backend: codex
     model: terra
-    reasoning: high
+    reasoning: medium
     sandbox: read-only
     read_only_check: true
     instructions: >
@@ -95,14 +101,15 @@ roles:
       verdict with no findings is useless.
 
   executor:
-    backend: codex
-    model: luna
-    reasoning: high
-    # If the project needs a build tool (Gradle, npm, Maven), also add:
-    # sandbox: workspace-write
-    # network: true            # Gradle downloads deps/the wrapper
-    # writable_dirs: [~/.gradle]      # Gradle's cache; keeps the sandbox on
-    # Previous setup: backend: deepseek, model: deepseek-flash, reasoning: medium, allowed_tools: [Bash]
+    backend: claude
+    model: sonnet
+    reasoning: medium
+    allowed_tools: [Bash, PowerShell]
+    # No sandbox on this backend: Bash/PowerShell run with your full user rights, and
+    # build tools (Gradle, npm) work as-is. To narrow it: ["Bash(./gradlew:*)", "Bash(git:*)"].
+    # Sandboxed alternative: backend: codex, model: luna, sandbox: workspace-write,
+    #   network: true, writable_dirs: [~/.gradle]
+    # Pay-per-token alternative: backend: deepseek, model: deepseek-flash, allowed_tools: [Bash]
     instructions: >
       You are the executor. Implement the attached plan exactly, step by step.
       Do not redesign, do not add scope, do not skip a step because it looks
@@ -121,9 +128,10 @@ roles:
     # alternatives: backend: deepseek, model: deepseek-v4-pro  |  backend: codex, model: luna, reasoning: minimal
     backend: claude
     model: haiku
-    reasoning: low
-    allowed_tools: [Bash]
-    read_only_check: true
+    reasoning: medium
+    allowed_tools: [Bash, PowerShell]
+    permission_mode: default   # file edits denied headless; only the allowed shells run
+    read_only_check: true      # note: untracked, non-gitignored test output also trips this
     instructions: >
       You are the tester. Do NOT edit, create or delete any file, and do not fix
       anything you find. Run exactly the verification commands given to you, in
@@ -135,8 +143,8 @@ roles:
 
   reviewer:
     backend: codex
-    model: sol
-    reasoning: high
+    model: astra
+    reasoning: medium
     sandbox: read-only
     read_only_check: true
     instructions: >
@@ -144,6 +152,8 @@ roles:
       executor's per-step status, and the tester's results. Trust the tester's
       pass/fail output - do not re-run the full suite; run a command yourself
       only to check something specific the tester did not cover.
+      Get the change yourself: run git status and git diff (new untracked files
+      do not show in git diff - read them directly).
       Review the current uncommitted diff against the plan step by step. Every
       finding must name the plan step id it belongs to (or UNPLANNED for changes
       no step asked for), the file:line, the problem, and the fix.

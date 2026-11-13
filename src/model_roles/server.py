@@ -98,6 +98,16 @@ def allowed_tools_list(value) -> list[str]:
     return str_list(value, "allowed_tools")
 
 
+def role_timeout(r: dict, default: int) -> int:
+    """roles.yaml per-role `timeout_seconds`, else the global one."""
+    value = r.get("timeout_seconds")
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"timeout_seconds must be a positive whole number, got {value!r}")
+    return value
+
+
 def writable_dirs_list(value) -> list[str]:
     """roles.yaml `writable_dirs` (codex): extra folders the sandbox may write, `~` expanded."""
     return [str(Path(d).expanduser()) for d in str_list(value, "writable_dirs")]
@@ -214,6 +224,8 @@ def describe(r: dict) -> str:
     parts = [f"{backend} / {model_label(backend, str(r.get('model', '')))}"]
     if r.get("reasoning"):
         parts.append(f"reasoning={r['reasoning']}")
+    if r.get("timeout_seconds") is not None:
+        parts.append(f"timeout={r['timeout_seconds']}s")
     if backend == "codex":
         if r.get("sandbox"):
             parts.append(f"sandbox={r['sandbox']}")
@@ -353,7 +365,9 @@ def delegate(role: str, task: str, cwd: str = ".", reasoning: str = "",
     check_unchanged = bool(r.get("read_only_check"))
     before = git_snapshot(cwd) if check_unchanged else None
     last_msg = None
+    timeout = cfg.timeout
     try:
+        timeout = role_timeout(r, cfg.timeout)
         cmd, env = build_command(r["backend"], r["model"], cfg, level, r)
         if r["backend"] == "codex":
             # Only the final answer, not codex's progress transcript.
@@ -364,14 +378,14 @@ def delegate(role: str, task: str, cwd: str = ".", reasoning: str = "",
             # The prompt goes in via stdin, which is then closed. Never let the child inherit the
             # MCP stdio channel: codex would block reading it as extra prompt input.
             cmd, cwd=cwd, env=env, input=prompt, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=cfg.timeout,
+            encoding="utf-8", errors="replace", timeout=timeout,
         )
         out = (proc.stdout or "").strip()
         if last_msg:
             final = Path(last_msg).read_text(encoding="utf-8", errors="replace").strip()
             out = final or out
     except subprocess.TimeoutExpired:
-        return f"[{role}] timed out."
+        return f"[{role}] timed out after {timeout}s."
     except ValueError as e:
         return f"[{role}] {e}"
     except Exception as e:  # noqa: BLE001
