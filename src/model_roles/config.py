@@ -27,6 +27,9 @@ import yaml
 
 PROPERTIES_NAME = "model-roles.properties"
 
+# /pipeline loop limits. See the `pipeline:` section of the bundled roles.yaml.
+PIPELINE_DEFAULTS = {"plan_review_rounds": 3, "plan_major_rounds": 1, "fix_loops": 3, "exec_retries": 1}
+
 
 def config_dir() -> Path:
     home = os.environ.get("MODEL_ROLES_HOME")
@@ -102,6 +105,22 @@ class Config:
     @property
     def timeout(self) -> int:
         return int(self.props.get("timeout_seconds") or self.data.get("timeout_seconds", 1800))
+
+    def pipeline_limits(self) -> dict[str, int]:
+        """/pipeline loop limits: properties `pipeline.<key>` > roles.yaml `pipeline:` > default.
+        Bad or negative values fall back to the default."""
+        section = self.data.get("pipeline") or {}
+        out = {}
+        for key, default in PIPELINE_DEFAULTS.items():
+            raw = self.props.get(f"pipeline.{key}")
+            if raw in (None, ""):
+                raw = section.get(key) if isinstance(section, dict) else None
+            try:
+                val = int(raw)
+            except (TypeError, ValueError):
+                val = default
+            out[key] = val if val >= 0 else default
+        return out
 
     def backend(self, name: str) -> dict:
         return (self.data.get("backends") or {}).get(name) or {}

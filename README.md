@@ -7,7 +7,7 @@ It hands work to other models by role. `roles.yaml` decides which model does whi
 |---|---|---|
 | planner | Opus (medium reasoning) via headless Claude Code | Claude subscription |
 | plan_reviewer | GPT Terra via `codex exec` | ChatGPT/Codex subscription |
-| executor | DeepSeek V4.1 Flash (`deepseek-flash`) via headless Claude Code + DeepSeek API | DeepSeek API key |
+| executor | GPT-6 Luna (`luna`, reasoning `high`) via `codex exec` | ChatGPT/Codex login |
 | tester | Haiku via headless Claude Code | Claude subscription |
 | reviewer | GPT Sol via `codex exec` | ChatGPT/Codex subscription |
 
@@ -89,8 +89,28 @@ Every tool call reads the config again, so edits apply without a restart.
 ```
 Or just ask: "use the roles tool, ask the planner for ...".
 
-The `/pipeline` stages: plan → plan review (max 2 corrections) → execute → gap
-re-send of unfinished steps (once) → test → review (max 3 loops).
+The `/pipeline` stages: plan → plan review → execute → gap re-send of unfinished
+steps → test → review → fix loops.
+
+Reviewers tag each finding `BLOCKER`, `MAJOR` or `MINOR`; only BLOCKER/MAJOR fail a
+review (`PLAN_ISSUES` / `CHANGES_NEEDED`). From the second round on, the reviewer gets
+its previous review attached and checks those findings first instead of reviewing
+from scratch, and the planner answers each finding (FIXED / REJECTED with a reason),
+so rounds converge instead of turning up a fresh batch of nits each time.
+After the first round only a BLOCKER triggers another full replan: open MAJORs
+are attached to the executor (and the reviewer) as notes, because each replan of a
+large plan tends to add new mechanisms that the next round then finds MAJORs in.
+
+Loop limits live in `roles.yaml` (or `pipeline.<key>=` in `model-roles.properties`):
+
+```yaml
+pipeline:
+  plan_review_rounds: 3   # then it asks you
+  plan_major_rounds: 1    # rounds where a MAJOR forces a replan; later MAJORs go
+                          # to the executor as notes, only BLOCKERs replan
+  fix_loops: 3            # review -> fix -> test -> review
+  exec_retries: 1         # re-sends of unfinished plan steps
+```
 
 ## Swap models
 
@@ -110,8 +130,9 @@ For the codex backend you can use short names: `astra`, `sol`, `terra`, `luna`. 
 
 ## Upgrading
 
-Existing installs keep their old `roles.yaml`. Either copy the `plan_reviewer` and
-`tester` blocks from the bundled `roles.yaml` into your `~/.config/model-roles/roles.yaml`
+Existing installs keep their old `roles.yaml`. Either copy the `plan_reviewer`,
+`tester` and `pipeline` blocks and the updated `instructions` of `planner`,
+`plan_reviewer`, `executor` and `reviewer` from the bundled `roles.yaml` into your `~/.config/model-roles/roles.yaml`
 (or project `./roles.yaml`), or run `model-roles init --force` (this overwrites your
 `roles.yaml` and pipeline command - back up custom edits first). `/pipeline` falls back
 to `reviewer` if those roles are missing.

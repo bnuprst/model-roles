@@ -245,7 +245,9 @@ def list_roles(cwd: str = "") -> str:
     """
     cfg = Config(cwd or None)
     lines = [f"{name}: {describe(r)}" for name, r in cfg.roles.items()]
-    lines.append(f"\nroles file: {cfg.roles_file}")
+    limits = cfg.pipeline_limits()
+    lines.append("\npipeline limits: " + " ".join(f"{k}={v}" for k, v in limits.items()))
+    lines.append(f"roles file: {cfg.roles_file}")
     lines.append(f"properties: {cfg.properties_file or '(none)'}")
     if any(r.get("backend") == "deepseek" for r in cfg.roles.values()):
         key, where = cfg.api_key("deepseek")
@@ -276,8 +278,9 @@ def artifact_path(cwd: str, name: str) -> Path:
 
 # Lines worth showing the orchestrator: step ids / status rows, verdicts, section headings.
 DIGEST_LINE = re.compile(
-    r"^\W*(S\d+\b|#|Verification commands|Definition of done|"
-    r"PLAN_OK|PLAN_ISSUES|APPROVE|CHANGES_NEEDED|TESTS_PASS|TESTS_FAIL|BLOCKED|FAIL\b)")
+    r"^\W*(S\d+\b|MISSING|UNPLANNED|#|Verification commands|Definition of done|Review responses|"
+    r"PLAN_OK|PLAN_ISSUES|APPROVE|CHANGES_NEEDED|TESTS_PASS|TESTS_FAIL|BLOCKED|FAIL\b)"
+    r"|.*\[(BLOCKER|MAJOR)\]")
 
 
 def digest(text: str, tail_lines: int = 25, limit: int = 6000) -> str:

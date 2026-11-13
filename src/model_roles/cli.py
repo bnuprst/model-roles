@@ -27,6 +27,10 @@ PROPERTIES_TEMPLATE = """\
 deepseek.api_key=
 # deepseek.base_url=https://api.deepseek.com/anthropic
 # timeout_seconds=1800
+# pipeline.plan_review_rounds=3
+# pipeline.plan_major_rounds=1
+# pipeline.fix_loops=3
+# pipeline.exec_retries=1
 """
 
 
@@ -144,6 +148,7 @@ def cmd_doctor(project_dir: str | None) -> None:
     cfg = Config(project_dir)
     print(f"roles file : {cfg.roles_file}")
     print(f"properties : {cfg.properties_file or '(none)'}")
+    print("pipeline   : " + " ".join(f"{k}={v}" for k, v in cfg.pipeline_limits().items()))
     for name, r in cfg.roles.items():
         print(f"  {name}: {describe(r)}")
         try:

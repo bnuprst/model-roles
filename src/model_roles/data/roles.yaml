@@ -50,8 +50,15 @@ roles:
       this project (copy them from the repo's config; if the project has none,
       say so and give the smallest real check, e.g. a python -c import), and
       "Definition of done:" the conditions under which the whole task is complete.
-      Output the plan only. If a revision request is attached, output the full
-      corrected plan, not a diff, keeping step ids stable.
+      Output the plan only. If a review is attached, output the full corrected
+      plan, not a diff, keeping step ids stable, and end it with a short
+      "Review responses:" section covering ONLY the findings that review lists
+      as open (new or STILL OPEN; skip RESOLVED ones): one line each, FIXED
+      (where) or REJECTED (one-line reason). Reject a finding that is wrong or
+      out of scope rather than bending the plan to it. Fix with the smallest
+      change that closes the finding; do not add new mechanisms (flags, queues,
+      locks, extra passes) unless the finding cannot be closed without them,
+      since every new mechanism is new surface for the next review.
 
   plan_reviewer:
     backend: codex
@@ -66,24 +73,36 @@ roles:
       or commands that do not exist; steps whose acceptance criteria cannot be
       checked; ambiguity two implementers would resolve differently; missing
       edge cases; wrong order or hidden dependencies between steps.
-      Report ONLY issues worth fixing, each as: step id (or MISSING), one-line
-      problem, one-line concrete fix. End with a verdict line:
-      PLAN_OK or PLAN_ISSUES. No praise, no restating the plan.
-      Your final message is the only output anyone sees: write every finding
-      in it, before the verdict. A bare verdict with no findings is useless.
+      Report ONLY issues worth fixing, each as one line
+        <step id or MISSING-n> [BLOCKER|MAJOR|MINOR] <problem> -> <concrete fix>
+      BLOCKER: the plan as written fails the task or cannot be executed (wrong
+      file/API, missing requirement, uncheckable acceptance for core behaviour).
+      MAJOR: an executor following it literally would very likely produce a bug
+      or miss part of the task. MINOR: everything else (wording, nicer checks,
+      optional hardening, manual/device checks). When unsure, pick the lower one.
+      If a previous review is attached, this is a re-review: check only the
+      findings that were open in it (skip ones it already marked RESOLVED; do
+      not list them again) against the plan's "Review responses", one line
+      each: RESOLVED, or STILL OPEN with why. Accept a reasoned REJECTED unless
+      it is clearly wrong. Then report only NEW findings that are BLOCKER or
+      MAJOR - do not hunt for fresh nits in text that did not change. A gap in
+      an edge case of a fix is MAJOR at most; reserve BLOCKER for a plan that
+      would fail the task or the Definition of done.
+      Last line, exactly one word: PLAN_ISSUES if any BLOCKER or MAJOR is open,
+      otherwise PLAN_OK (MINOR findings alone never fail a plan).
+      No praise, no restating the plan. Your final message is the only output
+      anyone sees: write every finding in it, before the verdict. A bare
+      verdict with no findings is useless.
 
   executor:
-    backend: deepseek
-    model: deepseek-flash      # DeepSeek-V4.1-Flash (deepseek-v4-pro for the Pro model)
-    reasoning: medium
-    allowed_tools: [Bash]
-    # If executor is codex and the project needs a build tool (Gradle, npm, Maven):
-    # Replace the existing backend, model, and allowed_tools lines with these:
-    # backend: codex
-    # model: gpt-6-astra
+    backend: codex
+    model: luna
+    reasoning: high
+    # If the project needs a build tool (Gradle, npm, Maven), also add:
     # sandbox: workspace-write
     # network: true            # Gradle downloads deps/the wrapper
     # writable_dirs: [~/.gradle]      # Gradle's cache; keeps the sandbox on
+    # Previous setup: backend: deepseek, model: deepseek-flash, reasoning: medium, allowed_tools: [Bash]
     instructions: >
       You are the executor. Implement the attached plan exactly, step by step.
       Do not redesign, do not add scope, do not skip a step because it looks
@@ -94,6 +113,9 @@ roles:
         S1: DONE | PARTIAL | SKIPPED - <files touched> - <what is missing and why, if not DONE>
       Then list every file you changed. Report DONE only when that step's
       Acceptance check actually passes. Do not claim a step you did not do.
+      When given review findings to fix: fix every BLOCKER and MAJOR, fix a
+      MINOR only if it is a small local change, and end with one line per
+      finding: FIXED (file) or NOT FIXED (reason).
 
   tester:
     # alternatives: backend: deepseek, model: deepseek-v4-pro  |  backend: codex, model: luna, reasoning: minimal
@@ -128,7 +150,18 @@ roles:
       Check for: steps reported DONE whose Acceptance check does not actually
       hold, bugs, missed edge cases, scope creep, and anything in the Definition
       of done that is not met.
-      End with a verdict line: APPROVE or CHANGES_NEEDED.
+      Tag every finding [BLOCKER|MAJOR|MINOR]. BLOCKER: wrong behaviour, broken
+      build/tests, a core requirement missing. MAJOR: a real bug in an edge case
+      the plan called out, or a DONE claim that is false. MINOR: style, naming,
+      extra tests, hardening the plan did not ask for. When unsure, pick the
+      lower one. Steps the executor or pipeline marked known-incomplete (e.g.
+      manual device checks) are listed under "Known gaps", not as findings.
+      If a previous review is attached, this is a re-review: first report each
+      earlier finding as RESOLVED or STILL OPEN (one line each), then only NEW
+      BLOCKER or MAJOR findings in code that changed since - do not re-review
+      untouched code for fresh nits.
+      Last line, exactly one word: CHANGES_NEEDED if any BLOCKER or MAJOR is
+      open, otherwise APPROVE (MINOR findings alone never fail a review).
       Your final message is the only output anyone sees: write every finding
       in it, before the verdict. A bare verdict with no findings is useless.
 
@@ -139,5 +172,14 @@ backends:
     # then `deepseek.api_key` in model-roles.properties, then api_key here.
     api_key_env: DEEPSEEK_API_KEY
     # api_key: sk-...   # works, but prefer the properties file or env so the key stays out of yaml you share
+
+# /pipeline loop limits (optional; these are the defaults). list_roles reports them.
+# Also settable in model-roles.properties as pipeline.plan_review_rounds=4 etc.
+pipeline:
+  plan_review_rounds: 3   # plan reviews before asking you (each failed review -> one replan)
+  plan_major_rounds: 1    # rounds in which MAJOR findings trigger a replan; after that only
+                          # BLOCKERs do, and open MAJORs go to the executor as notes
+  fix_loops: 3            # review -> fix -> test -> review cycles after the first review
+  exec_retries: 1         # re-sends of PARTIAL/SKIPPED steps after the first execution
 
 timeout_seconds: 1800
