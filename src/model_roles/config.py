@@ -28,7 +28,8 @@ import yaml
 PROPERTIES_NAME = "model-roles.properties"
 
 # /pipeline loop limits. See the `pipeline:` section of the bundled roles.yaml.
-PIPELINE_DEFAULTS = {"plan_review_rounds": 3, "plan_major_rounds": 1, "fix_loops": 3, "exec_retries": 1}
+PIPELINE_DEFAULTS = {"plan_review_rounds": 3, "plan_major_rounds": 1, "fix_loops": 3, "exec_retries": 1,
+                     "exec_batch_size": 3}
 
 
 def config_dir() -> Path:

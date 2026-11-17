@@ -22,8 +22,8 @@ findings. Write the findings." It does not count as a review round or fix loop.
 
 First call `list_roles(cwd=...)`. Its `pipeline limits:` line gives
 PLAN_ROUNDS (`plan_review_rounds`), MAJOR_ROUNDS (`plan_major_rounds`), FIX_LOOPS
-(`fix_loops`) and EXEC_RETRIES (`exec_retries`); if the line or a key is missing
-use 3, 1, 3 and 1. If `plan_reviewer` is missing, use `reviewer`
+(`fix_loops`), EXEC_RETRIES (`exec_retries`) and EXEC_BATCH (`exec_batch_size`); if
+the line or a key is missing use 3, 1, 3, 1 and 3. If `plan_reviewer` is missing, use `reviewer`
 for plan review (tell it: review the attached plan, not a diff, and end with PLAN_OK
 or PLAN_ISSUES). If `tester` is missing, skip the Test steps and tell `reviewer` to
 run the plan's Verification commands itself. Mention any missing role to me once.
@@ -57,17 +57,25 @@ run the plan's Verification commands itself. Mention any missing role to me once
    taken from the digest, plus the open MAJOR lines if NOTES is on.
 
 ## Execute
-5. `delegate(role="executor", attach=["plan"], save_as="exec",
-   task="Implement every step of the attached plan. Report status per step id.")`
+5. Execute in batches, so no single executor session carries the whole plan's
+   context. Split the plan's step ids, in order, into consecutive batches of
+   EXEC_BATCH steps (EXEC_BATCH 0 = one batch with every step). Run the batches one
+   after another, never in parallel. For batch k (1, 2, ...):
+   `delegate(role="executor", attach=["plan"], save_as="exec_<k>",
+   task="Implement only steps <ids> of the attached plan. Steps before them are
+   already done. Report status for these step ids only.")`
    If NOTES is on: `attach=["plan", "plan_review"]` and add to the task "The
-   attached plan_review lists open findings against the plan: handle each one
-   in the step it names, with the smallest change that closes it, and report
-   it as FIXED or NOT FIXED after the status table." 
-6. Check the status lines in the digest. If any step is PARTIAL, SKIPPED or missing,
-   call `executor` once more with `attach=["plan", "exec"]`, `save_as="exec"` and
-   task "Finish only steps <ids>; the attached exec report says why they were not
-   done." Do this at most EXEC_RETRIES times; then carry the remaining gaps forward as
-   known-incomplete and tell me.
+   attached plan_review lists open findings against the plan: handle the ones in
+   your steps, with the smallest change that closes each, and report each as FIXED
+   or NOT FIXED after the status table." 
+   EXEC_REPORTS = the list of `exec_<k>` names you saved, in order.
+6. After each batch, check its status lines in the digest. If any of its steps is
+   PARTIAL, SKIPPED or missing, call `executor` once more with
+   `attach=["plan", "exec_<k>"]`, `save_as="exec_<k>"` and task "Finish only steps
+   <ids>; the attached exec report says why they were not done." Do this at most
+   EXEC_RETRIES times per batch; then carry the remaining gaps forward as
+   known-incomplete, tell me, and go on with the next batch. If a gap is a step that
+   later steps depend on, stop and ask me instead.
 
 ## Test
 7. `delegate(role="tester", attach=["plan"], save_as="tests",
@@ -83,20 +91,20 @@ run the plan's Verification commands itself. Mention any missing role to me once
    yourself instead.
 
 ## Review
-8. First review: `delegate(role="reviewer", attach=["plan", "exec", "tests"],
+8. First review: `delegate(role="reviewer", attach=["plan", *EXEC_REPORTS, "tests"],
    save_as="review", task="Review the current diff against the attached plan,
    executor report and test results.")` (add a one-line note if the tester
    WARNING fired, and name any known-incomplete steps from step 6). If NOTES is
    on, also attach `plan_review` and add "The attached plan_review findings were
    handed to the executor as notes: changes that address them are planned, and
    any still not handled is a finding at its original tag." 
-   After a fix loop: `attach=["plan", "exec", "tests", "review"]` (plus
+   After a fix loop: `attach=["plan", "exec_fix", "tests", "review"]` (plus
    `plan_review` if NOTES is on), same
    `save_as`, task "Re-review: the attached review is your previous one. Mark
    each finding RESOLVED or STILL OPEN, then report only new BLOCKER/MAJOR
    issues in code changed since."
 9. If the verdict is CHANGES_NEEDED: `delegate(role="executor", attach=["plan",
-   "review"], save_as="exec", task="Fix the BLOCKER and MAJOR findings in the
+   "review"], save_as="exec_fix", task="Fix the BLOCKER and MAJOR findings in the
    attached review; MINOR ones only if trivial.")`, then repeat steps 7 and 8.
    **Max FIX_LOOPS fix loops.** If CHANGES_NEEDED remains after the last one,
    stop and list the open BLOCKER/MAJOR lines in the Finish report.

@@ -115,6 +115,9 @@ roles:
       Do not redesign, do not add scope, do not skip a step because it looks
       unnecessary. If a step is impossible as written, do the rest and report it
       rather than inventing a different design.
+      If the task names only some step ids, implement only those: earlier steps
+      are already done (build on them, do not redo them), later steps are for a
+      later call. The status table then covers only the named steps.
       End your output with a status table, one line per plan step id, nothing
       else between them:
         S1: DONE | PARTIAL | SKIPPED - <files touched> - <what is missing and why, if not DONE>
@@ -191,5 +194,6 @@ pipeline:
                           # BLOCKERs do, and open MAJORs go to the executor as notes
   fix_loops: 3            # review -> fix -> test -> review cycles after the first review
   exec_retries: 1         # re-sends of PARTIAL/SKIPPED steps after the first execution
+  exec_batch_size: 3      # plan steps per executor call (fresh session each; 0 = whole plan)
 
 timeout_seconds: 1800

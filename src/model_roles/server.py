@@ -190,7 +190,10 @@ def build_command(backend: str, model: str, cfg: Config, reasoning: str | None =
     if backend in ("claude", "deepseek"):
         exe = _exe("claude", "Install Claude Code first.")
         mode = check_permission_mode(role.get("permission_mode")) or "acceptEdits"
-        cmd = [exe, "-p", "--model", model, "--permission-mode", mode]
+        # --strict-mcp-config with no --mcp-config: the child loads no MCP servers. Otherwise it
+        # inherits every user MCP server (browser, docs, even this roles server), and their tool
+        # definitions are re-sent as context on every turn of every delegated call.
+        cmd = [exe, "-p", "--model", model, "--permission-mode", mode, "--strict-mcp-config"]
         tools = allowed_tools_list(role.get("allowed_tools"))
         if tools:
             cmd += ["--allowedTools", *tools]

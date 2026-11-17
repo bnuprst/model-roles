@@ -110,6 +110,9 @@ pipeline:
                           # to the executor as notes, only BLOCKERs replan
   fix_loops: 3            # review -> fix -> test -> review
   exec_retries: 1         # re-sends of unfinished plan steps
+  exec_batch_size: 3      # plan steps per executor call; each batch is a fresh
+                          # session, so context never grows across the whole plan
+                          # (0 = the whole plan in one call)
 ```
 
 ## Swap models

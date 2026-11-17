@@ -31,6 +31,7 @@ deepseek.api_key=
 # pipeline.plan_major_rounds=1
 # pipeline.fix_loops=3
 # pipeline.exec_retries=1
+# pipeline.exec_batch_size=3
 """
 
 
